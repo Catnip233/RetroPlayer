@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="AppResources/RetroPlayer-icon.png" width="180" alt="RetroPlayer logo">
+</p>
+
 # RetroPlayer
 
 RetroPlayer 是一款面向老动画与经典 4:3 影像的原生 macOS 播放器。它使用
