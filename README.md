@@ -28,16 +28,17 @@ libmpv 直接播放 MKV 等本地文件，并通过 GPU CRT-Lottes shader 提供
 
 - Apple Silicon Mac
 - macOS 26
-- Xcode 26
-- Homebrew 安装的 mpv / libmpv
+
+GitHub Release 中的应用已经内置 libmpv 及其动态库依赖，直接运行不需要安装
+Homebrew 或 mpv。
+
+## 运行
+
+从源码运行或打包时，需要完整安装 Xcode 26，并安装开发依赖：
 
 ```bash
 brew install mpv
 ```
-
-## 运行
-
-当前本机测试版需要 macOS 26，以及完整安装的 Xcode 26。
 
 ```bash
 swift run RetroPlayer
@@ -58,10 +59,15 @@ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 zsh scripts/package_app.sh
 ```
 
-应用会生成在 `outputs/RetroPlayer.app`。脚本使用 ad-hoc 本地签名，适合开发
-测试；公开分发仍需 Apple Developer ID 签名与公证。
+应用会生成在 `outputs/RetroPlayer.app`。打包脚本会递归收集 libmpv 及其
+Homebrew 动态库依赖，复制到 `Contents/Frameworks` 并重写为应用内部链接，
+同时将可用的第三方许可文本放入 `Contents/Resources/Licenses`。
+
+脚本使用 ad-hoc 本地签名，适合开发测试；公开分发仍需 Apple Developer ID
+签名与公证。
 
 ## 开源许可
 
 RetroPlayer 自有代码使用 [MIT License](LICENSE)。第三方组件说明见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。自包含应用包还包含使用
+GPL/LGPL 等许可证的动态库；应用内附带相应许可文本。

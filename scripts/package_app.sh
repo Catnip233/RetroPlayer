@@ -14,14 +14,22 @@ DEVELOPER_DIR="$developer_dir" CLANG_MODULE_CACHE_PATH="$project_dir/work/clang-
     --scratch-path "$project_dir/.build"
 
 rm -rf "$app_dir"
-mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
+mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Frameworks"
 cp "$project_dir/.build/release/RetroPlayer" "$app_dir/Contents/MacOS/RetroPlayer"
 cp "$project_dir/AppResources/Info.plist" "$app_dir/Contents/Info.plist"
 cp "$project_dir/Sources/RetroPlayer/Resources/CRT.glsl" "$app_dir/Contents/Resources/CRT.glsl"
 cp "$project_dir/AppResources/RetroPlayer.icns" "$app_dir/Contents/Resources/RetroPlayer.icns"
+cp "$project_dir/THIRD_PARTY_NOTICES.md" "$app_dir/Contents/Resources/THIRD_PARTY_NOTICES.md"
 chmod +x "$app_dir/Contents/MacOS/RetroPlayer"
+python3 "$project_dir/scripts/bundle_dylibs.py" \
+    "$app_dir/Contents/MacOS/RetroPlayer" \
+    "$app_dir/Contents/Frameworks"
 /usr/bin/xattr -cr "$app_dir"
 /usr/bin/codesign --force --deep --sign - "$app_dir"
+# Cloud-backed folders can reattach an empty FinderInfo xattr while the larger
+# self-contained bundle is being signed. Removing it does not alter the code
+# signature and keeps strict verification valid.
+/usr/bin/xattr -d com.apple.FinderInfo "$app_dir" 2>/dev/null || true
 /usr/bin/codesign --verify --deep --strict "$app_dir"
 
 echo "$app_dir"
