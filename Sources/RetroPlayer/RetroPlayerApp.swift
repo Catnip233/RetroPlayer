@@ -26,6 +26,27 @@ struct RetroPlayerApp: App {
                 Button("前进 10 秒") { player.skip(seconds: 10) }
                     .keyboardShortcut(.rightArrow, modifiers: [])
             }
+            CommandMenu("画面效果") {
+                ForEach(VideoPlayerModel.ShaderPreset.builtInPresets) { preset in
+                    Button(player.selectedShader == preset ? "✓ \(preset.name)" : preset.name) {
+                        player.selectShader(preset)
+                    }
+                }
+                Divider()
+                ForEach(VideoPlayerModel.ShaderPreset.communityPresets) { preset in
+                    Button(player.selectedShader == preset ? "✓ \(preset.name)" : preset.name) {
+                        player.selectShader(preset)
+                    }
+                }
+                Divider()
+                ForEach(VideoPlayerModel.ShaderPreset.sonyPresets) { preset in
+                    Button(player.selectedShader == preset ? "✓ \(preset.name)" : preset.name) {
+                        player.selectShader(preset)
+                    }
+                }
+                Divider()
+                Button("导入 mpv Shader…") { player.importShader() }
+            }
         }
     }
 }

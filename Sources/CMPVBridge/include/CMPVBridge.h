@@ -16,6 +16,7 @@ void rx_mpv_seek(RXMPV *player, double seconds);
 double rx_mpv_get_time(RXMPV *player);
 double rx_mpv_get_duration(RXMPV *player);
 void rx_mpv_set_volume(RXMPV *player, double volume);
+int rx_mpv_set_shader(RXMPV *player, const char *shader_path);
 void rx_mpv_set_shader_options(RXMPV *player, const char *options);
 
 #endif

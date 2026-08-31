@@ -161,6 +161,14 @@ void rx_mpv_set_volume(RXMPV *player, double volume) {
     mpv_set_property(player->handle, "volume", MPV_FORMAT_DOUBLE, &value);
 }
 
+int rx_mpv_set_shader(RXMPV *player, const char *shader_path) {
+    if (!player || !player->handle) return -1;
+    // glsl-shaders is a writable string-list property.  An empty string clears
+    // the list and restores unfiltered video; a path replaces the active list.
+    return mpv_set_property_string(player->handle, "glsl-shaders",
+                                   shader_path ? shader_path : "");
+}
+
 void rx_mpv_set_shader_options(RXMPV *player, const char *options) {
     if (player && player->handle && options) mpv_set_property_string(player->handle, "glsl-shader-opts", options);
 }

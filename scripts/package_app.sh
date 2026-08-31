@@ -2,8 +2,11 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-app_dir="$project_dir/outputs/RetroPlayer.app"
+final_app_dir="$project_dir/outputs/RetroPlayer.app"
+staging_dir="$(mktemp -d /private/tmp/retroplayer-package.XXXXXX)"
+app_dir="$staging_dir/RetroPlayer.app"
 developer_dir="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+trap 'rm -rf "$staging_dir"' EXIT
 
 cd "$project_dir"
 DEVELOPER_DIR="$developer_dir" CLANG_MODULE_CACHE_PATH="$project_dir/work/clang-cache" \
@@ -13,11 +16,10 @@ DEVELOPER_DIR="$developer_dir" CLANG_MODULE_CACHE_PATH="$project_dir/work/clang-
     --security-path "$project_dir/work/swiftpm-security" \
     --scratch-path "$project_dir/.build"
 
-rm -rf "$app_dir"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Frameworks"
 cp "$project_dir/.build/release/RetroPlayer" "$app_dir/Contents/MacOS/RetroPlayer"
 cp "$project_dir/AppResources/Info.plist" "$app_dir/Contents/Info.plist"
-cp "$project_dir/Sources/RetroPlayer/Resources/CRT.glsl" "$app_dir/Contents/Resources/CRT.glsl"
+cp "$project_dir/Sources/RetroPlayer/Resources/"*.glsl "$app_dir/Contents/Resources/"
 cp "$project_dir/AppResources/RetroPlayer.icns" "$app_dir/Contents/Resources/RetroPlayer.icns"
 cp "$project_dir/THIRD_PARTY_NOTICES.md" "$app_dir/Contents/Resources/THIRD_PARTY_NOTICES.md"
 chmod +x "$app_dir/Contents/MacOS/RetroPlayer"
@@ -32,4 +34,10 @@ python3 "$project_dir/scripts/bundle_dylibs.py" \
 /usr/bin/xattr -d com.apple.FinderInfo "$app_dir" 2>/dev/null || true
 /usr/bin/codesign --verify --deep --strict "$app_dir"
 
-echo "$app_dir"
+rm -rf "$final_app_dir"
+/usr/bin/ditto "$app_dir" "$final_app_dir"
+/usr/bin/xattr -cr "$final_app_dir"
+/usr/bin/xattr -d com.apple.FinderInfo "$final_app_dir" 2>/dev/null || true
+/usr/bin/codesign --verify --deep --strict "$final_app_dir"
+
+echo "$final_app_dir"

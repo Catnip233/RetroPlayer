@@ -110,6 +110,55 @@ struct ContentView: View {
 
                 Spacer()
 
+                Menu {
+                    Section("内置效果") {
+                        ForEach(VideoPlayerModel.ShaderPreset.builtInPresets) { preset in
+                            Button {
+                                model.selectShader(preset)
+                            } label: {
+                                if model.selectedShader == preset {
+                                    Label(preset.name, systemImage: "checkmark")
+                                } else {
+                                    Text(preset.name)
+                                }
+                            }
+                        }
+                    }
+                    Section("社区开源") {
+                        ForEach(VideoPlayerModel.ShaderPreset.communityPresets) { preset in
+                            Button {
+                                model.selectShader(preset)
+                            } label: {
+                                if model.selectedShader == preset {
+                                    Label(preset.name, systemImage: "checkmark")
+                                } else {
+                                    Text(preset.name)
+                                }
+                            }
+                        }
+                    }
+                    Section("Sony CRT 风格") {
+                        ForEach(VideoPlayerModel.ShaderPreset.sonyPresets) { preset in
+                            Button {
+                                model.selectShader(preset)
+                            } label: {
+                                if model.selectedShader == preset {
+                                    Label(preset.name, systemImage: "checkmark")
+                                } else {
+                                    Text(preset.name)
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("导入 mpv Shader…") { model.importShader() }
+                } label: {
+                    Label(model.shaderDisplayName, systemImage: "sparkles.tv")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
                 Image(systemName: "speaker.wave.2.fill")
                     .foregroundStyle(.white.opacity(0.65))
                 Slider(value: $model.volume, in: 0...1)

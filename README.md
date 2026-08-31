@@ -5,17 +5,28 @@
 # RetroPlayer
 
 RetroPlayer 是一款面向老动画与经典 4:3 影像的原生 macOS 播放器。它使用
-libmpv 直接播放 MKV 等本地文件，并通过 GPU CRT-Lottes shader 提供扫描线、
-轻微荧光溢出和荫罩效果，不做音视频转码。
+libmpv 直接播放 MKV 等本地文件，并通过可切换的 GPU shader 提供扫描线、
+荧光溢出、彩色荫罩、VHS 和黑白电视效果，不做音视频转码。
 
 ## 功能
 
 - MKV、Opus、FLAC、ASS 等格式由 libmpv 直接解码
 - 自动加载内嵌及同目录字幕
 - 居中裁切竖屏封装视频的上下黑边，以 4:3 显示
-- 无屏幕弯曲的柔和 CRT-Lottes 效果
+- 12 种画面模式：保留全部内置效果与社区 Shader，并增加 PVM 20L4、
+  PVM 2730 和 Kurozumi BVM 三种无弧度 Sony CRT 风格
+- 支持导入 mpv User Shader（`.glsl`），切换后即时生效并记住选择
 - 拖放视频、进度控制、音量控制及原生 macOS 文件选择器
 - 默认音量 100%
+
+社区 Shader 来自经过实际 libmpv OpenGL 兼容性验证的
+[`hhirtz/mpv-retro-shaders`](https://github.com/hhirtz/mpv-retro-shaders) 与
+[`bloc97/Anime4K`](https://github.com/bloc97/Anime4K)。CRT-Royale、Aperture、
+GDV 等 gpu-next 专用移植版未直接内置，避免在当前渲染后端中黑屏。
+
+Sony CRT 风格预设参考了开源社区的 Sony Megatron PVM 参数、
+CRT-Royale Kurozumi 和 Guest Advanced Trinitron 方向，并针对 RetroPlayer 的
+OpenGL 后端重新实现。它们是非官方视觉模拟，与 Sony 无隶属关系。
 
 ## 快捷键
 
