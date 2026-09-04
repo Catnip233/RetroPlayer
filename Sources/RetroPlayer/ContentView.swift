@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: VideoPlayerModel
     @State private var isTargeted = false
     @State private var showControls = true
+    @State private var controlsHideTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -19,7 +20,10 @@ struct ContentView: View {
             } else {
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture { model.togglePlayback() }
+                    .onTapGesture {
+                        revealControls()
+                        model.togglePlayback()
+                    }
             }
 
             if isTargeted {
@@ -39,7 +43,9 @@ struct ContentView: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .background(WindowAspectRatioSetter(aspectRatio: model.videoAspectRatio))
+        .background(WindowButtonsVisibilitySetter(isVisible: showControls || !model.hasMedia))
         .background(WindowCloseTerminator())
+        .background(MouseActivityMonitor { revealControls() })
         .background(
             KeyboardEventMonitor { keyCode in
                 switch keyCode {
@@ -54,9 +60,16 @@ struct ContentView: View {
             }
         )
         .preferredColorScheme(.dark)
-        .onHover { inside in
-            withAnimation(.easeOut(duration: 0.15)) { showControls = inside || !model.hasMedia }
+        .onChange(of: model.hasMedia) { _, hasMedia in
+            if hasMedia {
+                revealControls()
+            } else {
+                controlsHideTask?.cancel()
+                setWindowButtonsVisible(true)
+                withAnimation(.easeOut(duration: 0.15)) { showControls = true }
+            }
         }
+        .onDisappear { controlsHideTask?.cancel() }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isTargeted) { providers in
             guard let provider = providers.first else { return false }
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
@@ -66,6 +79,30 @@ struct ContentView: View {
                 if let url { Task { @MainActor in model.handleDrop(url) } }
             }
             return true
+        }
+    }
+
+    private func revealControls() {
+        controlsHideTask?.cancel()
+        setWindowButtonsVisible(true)
+        if !showControls {
+            withAnimation(.easeOut(duration: 0.15)) { showControls = true }
+        }
+        scheduleControlsHide()
+    }
+
+    private func scheduleControlsHide() {
+        controlsHideTask?.cancel()
+        guard model.hasMedia else {
+            showControls = true
+            return
+        }
+
+        controlsHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, model.hasMedia else { return }
+            setWindowButtonsVisible(false)
+            withAnimation(.easeOut(duration: 0.2)) { showControls = false }
         }
     }
 
@@ -240,6 +277,85 @@ struct ContentView: View {
                 .foregroundStyle(prominent ? .black : .white)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct MouseActivityMonitor: NSViewRepresentable {
+    let handler: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(handler: handler) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: events) { event in
+            context.coordinator.handler()
+            return event
+        }
+        DispatchQueue.main.async { view.window?.acceptsMouseMovedEvents = true }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.handler = handler
+        view.window?.acceptsMouseMovedEvents = true
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    final class Coordinator {
+        var handler: () -> Void
+        var monitor: Any?
+
+        init(handler: @escaping () -> Void) {
+            self.handler = handler
+        }
+    }
+}
+
+private struct WindowButtonsVisibilitySetter: NSViewRepresentable {
+    let isVisible: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        updateButtons(for: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        updateButtons(for: view)
+    }
+
+    private func updateButtons(for view: NSView) {
+        let shouldHide = !isVisible
+        applyVisibility(to: view.window, shouldHide: shouldHide)
+        DispatchQueue.main.async {
+            applyVisibility(to: view.window, shouldHide: shouldHide)
+        }
+    }
+
+    private func applyVisibility(to window: NSWindow?, shouldHide: Bool) {
+        setWindowButtonsVisible(!shouldHide, in: window)
+    }
+}
+
+@MainActor
+private func setWindowButtonsVisible(_ visible: Bool, in targetWindow: NSWindow? = nil) {
+    guard let window = targetWindow ?? NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow else { return }
+    let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+    let buttons = types.compactMap { window.standardWindowButton($0) }
+
+    for button in buttons {
+        button.alphaValue = visible ? 1 : 0
+        button.isEnabled = visible
+        button.isHidden = !visible
+    }
+
+    if let container = buttons.first?.superview {
+        container.alphaValue = visible ? 1 : 0
+        container.isHidden = !visible
     }
 }
 
