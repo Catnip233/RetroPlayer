@@ -15,13 +15,13 @@
     <key>CFBundleName</key>
     <string>RetroPlayer</string>
     <key>CFBundleIconFile</key>
-    <string>RetroPlayer</string>
+    <string>RetroPlayer.icns</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
 	<string>0.12.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>12</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.video</string>
     <key>LSMinimumSystemVersion</key>
