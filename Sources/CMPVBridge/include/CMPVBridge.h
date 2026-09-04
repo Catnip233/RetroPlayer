@@ -2,6 +2,8 @@
 #define CMPVBridge_h
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 typedef struct RXMPV RXMPV;
 
 RXMPV *rx_mpv_create(const char *shader_path);
@@ -15,8 +17,19 @@ bool rx_mpv_get_pause(RXMPV *player);
 void rx_mpv_seek(RXMPV *player, double seconds);
 double rx_mpv_get_time(RXMPV *player);
 double rx_mpv_get_duration(RXMPV *player);
+double rx_mpv_get_video_aspect(RXMPV *player);
 void rx_mpv_set_volume(RXMPV *player, double volume);
 int rx_mpv_set_shader(RXMPV *player, const char *shader_path);
 void rx_mpv_set_shader_options(RXMPV *player, const char *options);
+uint64_t rx_mpv_get_track_revision(RXMPV *player);
+int64_t rx_mpv_get_track_count(RXMPV *player);
+int rx_mpv_get_track_type(RXMPV *player, int64_t index);
+int64_t rx_mpv_get_track_id(RXMPV *player, int64_t index);
+bool rx_mpv_get_track_selected(RXMPV *player, int64_t index);
+bool rx_mpv_copy_track_string(RXMPV *player, int64_t index, const char *field,
+                              char *buffer, size_t buffer_size);
+int rx_mpv_set_audio_track(RXMPV *player, int64_t track_id);
+int rx_mpv_set_subtitle_track(RXMPV *player, int64_t track_id);
+int rx_mpv_add_subtitle(RXMPV *player, const char *path);
 
 #endif

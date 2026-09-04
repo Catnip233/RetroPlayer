@@ -1,14 +1,22 @@
+import AppKit
 import SwiftUI
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
 
 @main
 struct RetroPlayerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var player = VideoPlayerModel()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(player)
-                .frame(minWidth: 640, minHeight: 480)
+                .frame(minWidth: 480, minHeight: 270)
         }
         .defaultSize(width: 960, height: 720)
         .windowStyle(.hiddenTitleBar)

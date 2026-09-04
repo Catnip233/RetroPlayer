@@ -7,7 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct RXMPV { mpv_handle *handle; mpv_render_context *render; };
+struct RXMPV {
+    mpv_handle *handle;
+    mpv_render_context *render;
+    uint64_t track_revision;
+};
 
 static void *rx_get_proc_address(void *context, const char *name) {
     (void)context;
@@ -25,11 +29,9 @@ RXMPV *rx_mpv_create(const char *shader_path) {
     mpv_set_option_string(player->handle, "hwdec", "auto-safe");
     mpv_set_option_string(player->handle, "keep-open", "yes");
     mpv_set_option_string(player->handle, "osc", "no");
-    // Phone-formatted uploads often contain a 4:3 picture centered inside a
-    // portrait frame. Crop the decoded frame to its centered 4:3 region so
-    // the baked-in black bars never reach the monitor surface.
-    mpv_set_option_string(player->handle, "video-crop", "4:3");
-    mpv_set_option_string(player->handle, "sub-auto", "fuzzy");
+    // Automatically attach sidecar subtitles whose basename exactly matches
+    // the video (for example Episode01.mkv + Episode01.ass).
+    mpv_set_option_string(player->handle, "sub-auto", "exact");
     mpv_set_option_string(player->handle, "sub-visibility", "yes");
     mpv_set_option_string(player->handle, "sub-font", "Songti SC");
     mpv_set_option_string(player->handle, "sub-bold", "yes");
@@ -116,7 +118,10 @@ void rx_mpv_poll_events(RXMPV *player) {
     for (;;) {
         mpv_event *event = mpv_wait_event(player->handle, 0);
         if (event->event_id == MPV_EVENT_NONE) break;
-        if (event->event_id == MPV_EVENT_FILE_LOADED) rx_select_first_subtitle(player);
+        if (event->event_id == MPV_EVENT_FILE_LOADED) {
+            rx_select_first_subtitle(player);
+            player->track_revision++;
+        }
     }
 }
 
@@ -155,6 +160,19 @@ static double rx_get_double(RXMPV *player, const char *property) {
 double rx_mpv_get_time(RXMPV *player) { return rx_get_double(player, "time-pos"); }
 double rx_mpv_get_duration(RXMPV *player) { return rx_get_double(player, "duration"); }
 
+double rx_mpv_get_video_aspect(RXMPV *player) {
+    double aspect = rx_get_double(player, "video-out-params/aspect");
+    if (aspect <= 0.0 && player && player->handle) {
+        int64_t width = 0;
+        int64_t height = 0;
+        mpv_get_property(player->handle, "video-out-params/dw", MPV_FORMAT_INT64, &width);
+        mpv_get_property(player->handle, "video-out-params/dh", MPV_FORMAT_INT64, &height);
+        if (width > 0 && height > 0) aspect = (double)width / (double)height;
+    }
+    if (aspect <= 0.0) aspect = rx_get_double(player, "video-params/aspect");
+    return aspect;
+}
+
 void rx_mpv_set_volume(RXMPV *player, double volume) {
     if (!player || !player->handle) return;
     double value = volume * 100.0;
@@ -171,4 +189,94 @@ int rx_mpv_set_shader(RXMPV *player, const char *shader_path) {
 
 void rx_mpv_set_shader_options(RXMPV *player, const char *options) {
     if (player && player->handle && options) mpv_set_property_string(player->handle, "glsl-shader-opts", options);
+}
+
+uint64_t rx_mpv_get_track_revision(RXMPV *player) {
+    return player ? player->track_revision : 0;
+}
+
+int64_t rx_mpv_get_track_count(RXMPV *player) {
+    int64_t count = 0;
+    if (player && player->handle) {
+        mpv_get_property(player->handle, "track-list/count", MPV_FORMAT_INT64, &count);
+    }
+    return count;
+}
+
+int rx_mpv_get_track_type(RXMPV *player, int64_t index) {
+    if (!player || !player->handle) return 0;
+    char property[96];
+    snprintf(property, sizeof(property), "track-list/%lld/type", (long long)index);
+    char *type = mpv_get_property_string(player->handle, property);
+    int result = type && strcmp(type, "audio") == 0 ? 1
+        : type && strcmp(type, "sub") == 0 ? 2 : 0;
+    mpv_free(type);
+    return result;
+}
+
+int64_t rx_mpv_get_track_id(RXMPV *player, int64_t index) {
+    if (!player || !player->handle) return -1;
+    char property[96];
+    int64_t track_id = -1;
+    snprintf(property, sizeof(property), "track-list/%lld/id", (long long)index);
+    mpv_get_property(player->handle, property, MPV_FORMAT_INT64, &track_id);
+    return track_id;
+}
+
+bool rx_mpv_get_track_selected(RXMPV *player, int64_t index) {
+    if (!player || !player->handle) return false;
+    char property[96];
+    int selected = 0;
+    snprintf(property, sizeof(property), "track-list/%lld/selected", (long long)index);
+    mpv_get_property(player->handle, property, MPV_FORMAT_FLAG, &selected);
+    return selected != 0;
+}
+
+bool rx_mpv_copy_track_string(RXMPV *player, int64_t index, const char *field,
+                              char *buffer, size_t buffer_size) {
+    if (!player || !player->handle || !field || !buffer || buffer_size == 0) return false;
+    char property[128];
+    snprintf(property, sizeof(property), "track-list/%lld/%s", (long long)index, field);
+    char *value = mpv_get_property_string(player->handle, property);
+    if (!value || !value[0]) {
+        if (value) mpv_free(value);
+        buffer[0] = '\0';
+        return false;
+    }
+    snprintf(buffer, buffer_size, "%s", value);
+    mpv_free(value);
+    return true;
+}
+
+int rx_mpv_set_audio_track(RXMPV *player, int64_t track_id) {
+    if (!player || !player->handle) return -1;
+    int result = mpv_set_property(player->handle, "aid", MPV_FORMAT_INT64, &track_id);
+    if (result >= 0) player->track_revision++;
+    return result;
+}
+
+int rx_mpv_set_subtitle_track(RXMPV *player, int64_t track_id) {
+    if (!player || !player->handle) return -1;
+    int result;
+    if (track_id < 0) {
+        result = mpv_set_property_string(player->handle, "sid", "no");
+    } else {
+        result = mpv_set_property(player->handle, "sid", MPV_FORMAT_INT64, &track_id);
+    }
+    int visible = track_id >= 0 ? 1 : 0;
+    mpv_set_property(player->handle, "sub-visibility", MPV_FORMAT_FLAG, &visible);
+    if (result >= 0) player->track_revision++;
+    return result;
+}
+
+int rx_mpv_add_subtitle(RXMPV *player, const char *path) {
+    if (!player || !player->handle || !path || !path[0]) return -1;
+    const char *command[] = { "sub-add", path, "select", NULL };
+    int result = mpv_command(player->handle, command);
+    if (result >= 0) {
+        int visible = 1;
+        mpv_set_property(player->handle, "sub-visibility", MPV_FORMAT_FLAG, &visible);
+        player->track_revision++;
+    }
+    return result;
 }

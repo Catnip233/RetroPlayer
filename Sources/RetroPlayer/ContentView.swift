@@ -12,8 +12,7 @@ struct ContentView: View {
             Color.black
 
             MPVVideoView(model: model)
-                .aspectRatio(4.0 / 3.0, contentMode: .fit)
-                .clipShape(Rectangle())
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if !model.hasMedia {
                 emptyState
@@ -38,7 +37,9 @@ struct ContentView: View {
                 .transition(.opacity)
             }
         }
-        .background(WindowAspectRatioSetter())
+        .ignoresSafeArea(.container, edges: .top)
+        .background(WindowAspectRatioSetter(aspectRatio: model.videoAspectRatio))
+        .background(WindowCloseTerminator())
         .background(
             KeyboardEventMonitor { keyCode in
                 switch keyCode {
@@ -62,7 +63,7 @@ struct ContentView: View {
                 let url: URL?
                 if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
                 else { url = item as? URL }
-                if let url { Task { @MainActor in model.load(url) } }
+                if let url { Task { @MainActor in model.handleDrop(url) } }
             }
             return true
         }
@@ -75,7 +76,7 @@ struct ContentView: View {
                     .font(.system(size: 34, weight: .thin))
                 Text("拖入视频")
                     .font(.system(size: 15, weight: .semibold))
-                Text("自动裁掉上下黑边，居中显示 4:3 画面")
+                Text("自动贴合视频比例，无额外黑边")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.48))
             }
@@ -109,6 +110,62 @@ struct ContentView: View {
                 iconButton("goforward.10") { model.skip(seconds: 10) }
 
                 Spacer()
+
+                Menu {
+                    if model.audioTracks.isEmpty {
+                        Text("没有可用音轨")
+                    } else {
+                        ForEach(model.audioTracks) { track in
+                            Button {
+                                model.selectAudioTrack(track.id)
+                            } label: {
+                                if model.selectedAudioID == track.id {
+                                    Label(track.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(track.displayName)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("音轨", systemImage: "waveform")
+                        .font(.system(size: 12, weight: .medium))
+                        .help(model.audioTrackDisplayName)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Menu {
+                    Button {
+                        model.selectSubtitleTrack(nil)
+                    } label: {
+                        if model.selectedSubtitleID == nil {
+                            Label("关闭字幕", systemImage: "checkmark")
+                        } else {
+                            Text("关闭字幕")
+                        }
+                    }
+                    if !model.subtitleTracks.isEmpty {
+                        Divider()
+                        ForEach(model.subtitleTracks) { track in
+                            Button {
+                                model.selectSubtitleTrack(track.id)
+                            } label: {
+                                if model.selectedSubtitleID == track.id {
+                                    Label(track.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(track.displayName)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("字幕", systemImage: model.selectedSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill")
+                        .font(.system(size: 12, weight: .medium))
+                        .help(model.subtitleTrackDisplayName)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
 
                 Menu {
                     Section("内置效果") {
@@ -186,6 +243,56 @@ struct ContentView: View {
     }
 }
 
+private struct WindowCloseTerminator: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.observe(window: view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            context.coordinator.observe(window: view.window)
+        }
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.stopObserving()
+    }
+
+    final class Coordinator {
+        private weak var window: NSWindow?
+        private var observer: NSObjectProtocol?
+
+        func observe(window newWindow: NSWindow?) {
+            guard let newWindow, newWindow !== window else { return }
+            stopObserving()
+            window = newWindow
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: newWindow,
+                queue: .main
+            ) { _ in
+                Task { @MainActor in
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+        }
+
+        func stopObserving() {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            window = nil
+        }
+
+        deinit { stopObserving() }
+    }
+}
+
 private struct KeyboardEventMonitor: NSViewRepresentable {
     let handler: (UInt16) -> Bool
 
@@ -223,17 +330,55 @@ private struct KeyboardEventMonitor: NSViewRepresentable {
 }
 
 private struct WindowAspectRatioSetter: NSViewRepresentable {
+    let aspectRatio: Double
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            view.window?.contentAspectRatio = NSSize(width: 4, height: 3)
+            applyAspectRatio(to: view.window, coordinator: context.coordinator)
         }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
-            view.window?.contentAspectRatio = NSSize(width: 4, height: 3)
+            applyAspectRatio(to: view.window, coordinator: context.coordinator)
         }
+    }
+
+    private func applyAspectRatio(to window: NSWindow?, coordinator: Coordinator) {
+        guard aspectRatio.isFinite, aspectRatio > 0,
+              let window,
+              abs(coordinator.lastAspectRatio - aspectRatio) > 0.001
+        else { return }
+
+        coordinator.lastAspectRatio = aspectRatio
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.contentAspectRatio = NSSize(width: aspectRatio, height: 1)
+
+        let currentSize = window.contentView?.bounds.size ?? window.contentLayoutRect.size
+        let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+        let maximumWidth = max(480, (visibleFrame?.width ?? 1200) - 48)
+        let frameInset = max(0, window.frame.height - currentSize.height)
+        let maximumHeight = max(270, (visibleFrame?.height ?? 900) - frameInset - 48)
+
+        var width = min(max(currentSize.width, 480), maximumWidth)
+        var height = width / aspectRatio
+        if height > maximumHeight {
+            height = maximumHeight
+            width = height * aspectRatio
+        }
+
+        let topLeft = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        window.setContentSize(NSSize(width: width, height: height))
+        window.setFrameTopLeftPoint(topLeft)
+    }
+
+    final class Coordinator {
+        var lastAspectRatio = 0.0
     }
 }
