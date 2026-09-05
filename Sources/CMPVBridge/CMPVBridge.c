@@ -49,6 +49,7 @@ RXMPV *rx_mpv_create(const char *shader_path) {
     if (mpv_initialize(player->handle) < 0) {
         mpv_terminate_destroy(player->handle); free(player); return NULL;
     }
+    mpv_request_log_messages(player->handle, "warn");
     return player;
 }
 
@@ -113,16 +114,38 @@ static void rx_select_first_subtitle(RXMPV *player) {
     }
 }
 
-void rx_mpv_poll_events(RXMPV *player) {
-    if (!player || !player->handle) return;
+uint32_t rx_mpv_poll_events(RXMPV *player) {
+    if (!player || !player->handle) return 0;
+    uint32_t flags = 0;
     for (;;) {
         mpv_event *event = mpv_wait_event(player->handle, 0);
         if (event->event_id == MPV_EVENT_NONE) break;
         if (event->event_id == MPV_EVENT_FILE_LOADED) {
             rx_select_first_subtitle(player);
             player->track_revision++;
+            flags |= RX_MPV_EVENT_FILE_LOADED;
+        } else if (event->event_id == MPV_EVENT_END_FILE) {
+            mpv_event_end_file *end = event->data;
+            if (end && end->reason == MPV_END_FILE_REASON_EOF) {
+                flags |= RX_MPV_EVENT_END_FILE;
+            } else if (end && end->reason == MPV_END_FILE_REASON_ERROR) {
+                flags |= RX_MPV_EVENT_PLAYBACK_ERROR;
+            }
+        } else if (event->event_id == MPV_EVENT_LOG_MESSAGE) {
+            mpv_event_log_message *message = event->data;
+            if (!message || !message->prefix || !message->text) continue;
+            bool shader_source = strstr(message->prefix, "shader") ||
+                                 strstr(message->prefix, "glsl") ||
+                                 strstr(message->text, "shader") ||
+                                 strstr(message->text, "GLSL");
+            bool failure = strcmp(message->level, "error") == 0 ||
+                           strcmp(message->level, "fatal") == 0 ||
+                           strstr(message->text, "failed") ||
+                           strstr(message->text, "error");
+            if (shader_source && failure) flags |= RX_MPV_EVENT_SHADER_ERROR;
         }
     }
+    return flags;
 }
 
 int rx_mpv_load(RXMPV *player, const char *path) {
@@ -140,6 +163,14 @@ void rx_mpv_set_pause(RXMPV *player, bool paused) {
 bool rx_mpv_get_pause(RXMPV *player) {
     int value = 1;
     if (player && player->handle) mpv_get_property(player->handle, "pause", MPV_FORMAT_FLAG, &value);
+    return value != 0;
+}
+
+bool rx_mpv_get_eof_reached(RXMPV *player) {
+    int value = 0;
+    if (player && player->handle) {
+        mpv_get_property(player->handle, "eof-reached", MPV_FORMAT_FLAG, &value);
+    }
     return value != 0;
 }
 
@@ -187,8 +218,38 @@ int rx_mpv_set_shader(RXMPV *player, const char *shader_path) {
                                    shader_path ? shader_path : "");
 }
 
+int rx_mpv_set_shader_pipeline(RXMPV *player, const char *capture_path,
+                               const char *shader_path, const char *blend_path) {
+    if (!player || !player->handle) return -1;
+    if (!shader_path || !shader_path[0]) return rx_mpv_set_shader(player, NULL);
+    if (!capture_path || !capture_path[0] || !blend_path || !blend_path[0]) {
+        return rx_mpv_set_shader(player, shader_path);
+    }
+    size_t length = strlen(capture_path) + strlen(shader_path) + strlen(blend_path) + 3;
+    char *pipeline = malloc(length);
+    if (!pipeline) return -1;
+    snprintf(pipeline, length, "%s:%s:%s", capture_path, shader_path, blend_path);
+    int result = mpv_set_property_string(player->handle, "glsl-shaders", pipeline);
+    free(pipeline);
+    return result;
+}
+
 void rx_mpv_set_shader_options(RXMPV *player, const char *options) {
     if (player && player->handle && options) mpv_set_property_string(player->handle, "glsl-shader-opts", options);
+}
+
+int rx_mpv_set_double_property(RXMPV *player, const char *name, double value) {
+    if (!player || !player->handle || !name) return -1;
+    return mpv_set_property(player->handle, name, MPV_FORMAT_DOUBLE, &value);
+}
+
+double rx_mpv_get_double_property(RXMPV *player, const char *name) {
+    return rx_get_double(player, name);
+}
+
+int rx_mpv_set_string_property(RXMPV *player, const char *name, const char *value) {
+    if (!player || !player->handle || !name || !value) return -1;
+    return mpv_set_property_string(player->handle, name, value);
 }
 
 uint64_t rx_mpv_get_track_revision(RXMPV *player) {

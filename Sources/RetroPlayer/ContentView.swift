@@ -33,6 +33,20 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
 
+            if let message = model.shaderStatusMessage {
+                VStack {
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.82), in: Capsule())
+                        .foregroundStyle(.orange)
+                    Spacer()
+                }
+                .padding(.top, 36)
+                .allowsHitTesting(false)
+            }
+
             if showControls {
                 VStack {
                     Spacer()
@@ -46,6 +60,7 @@ struct ContentView: View {
         .background(WindowButtonsVisibilitySetter(isVisible: showControls || !model.hasMedia))
         .background(WindowCloseTerminator())
         .background(MouseActivityMonitor { revealControls() })
+        .background(OriginalPreviewKeyMonitor { model.setOriginalPreview($0) })
         .background(
             KeyboardEventMonitor { keyCode in
                 switch keyCode {
@@ -107,19 +122,47 @@ struct ContentView: View {
     }
 
     private var emptyState: some View {
-        Button(action: model.openMovie) {
-            VStack(spacing: 10) {
-                Image(systemName: "play.rectangle")
-                    .font(.system(size: 34, weight: .thin))
-                Text("拖入视频")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("自动贴合视频比例，无额外黑边")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.48))
+        VStack(spacing: 20) {
+            Button(action: model.openMovie) {
+                VStack(spacing: 10) {
+                    Image(systemName: "play.rectangle")
+                        .font(.system(size: 34, weight: .thin))
+                    Text("拖入视频")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("自动贴合视频比例，无额外黑边")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+                .foregroundStyle(.white.opacity(0.76))
             }
-            .foregroundStyle(.white.opacity(0.76))
+            .buttonStyle(.plain)
+
+            if !model.recentItems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("最近播放")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.38))
+                    ForEach(model.recentItems.prefix(3)) { item in
+                        Button {
+                            model.openRecent(item)
+                        } label: {
+                            HStack {
+                                Text(item.title).lineLimit(1)
+                                Spacer()
+                                if item.progress > 0 {
+                                    Text(VideoPlayerModel.timecode(item.progress))
+                                        .font(.system(size: 9, design: .monospaced))
+                                }
+                            }
+                            .frame(width: 260)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.62))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
-        .buttonStyle(.plain)
     }
 
     private var controls: some View {
@@ -146,6 +189,25 @@ struct ContentView: View {
                 iconButton(model.isPlaying ? "pause.fill" : "play.fill", prominent: true) { model.togglePlayback() }
                 iconButton("goforward.10") { model.skip(seconds: 10) }
 
+                Menu {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button {
+                            model.setPlaybackRate(rate)
+                        } label: {
+                            if abs(model.playbackRate - rate) < 0.001 {
+                                Label(String(format: "%.2g×", rate), systemImage: "checkmark")
+                            } else {
+                                Text(String(format: "%.2g×", rate))
+                            }
+                        }
+                    }
+                } label: {
+                    Text(String(format: "%.2g×", model.playbackRate))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
                 Spacer()
 
                 Menu {
@@ -164,6 +226,11 @@ struct ContentView: View {
                             }
                         }
                     }
+                    Divider()
+                    Text(String(format: "音频延迟 %+.1f 秒", model.audioDelay))
+                    Button("音频提前 0.1 秒") { model.adjustAudioDelay(by: -0.1) }
+                    Button("音频延后 0.1 秒") { model.adjustAudioDelay(by: 0.1) }
+                    Button("重置音频延迟") { model.audioDelay = 0 }
                 } label: {
                     Label("音轨", systemImage: "waveform")
                         .font(.system(size: 12, weight: .medium))
@@ -196,6 +263,40 @@ struct ContentView: View {
                             }
                         }
                     }
+                    Divider()
+                    Menu("字幕字体") {
+                        ForEach(["Songti SC", "STKaiti", "Hiragino Sans GB", "PingFang SC", "Arial"], id: \.self) { font in
+                            Button(model.subtitleFont == font ? "✓ \(font)" : font) {
+                                model.subtitleFont = font
+                            }
+                        }
+                    }
+                    Menu("字幕大小 · \(Int(model.subtitleSize))") {
+                        ForEach([28.0, 34.0, 40.0, 46.0, 54.0, 64.0], id: \.self) { size in
+                            Button(model.subtitleSize == size ? "✓ \(Int(size))" : "\(Int(size))") {
+                                model.subtitleSize = size
+                            }
+                        }
+                    }
+                    Menu("字幕位置 · \(Int(model.subtitlePosition))%") {
+                        ForEach([70.0, 78.0, 86.0, 92.0, 96.0], id: \.self) { position in
+                            Button(model.subtitlePosition == position ? "✓ \(Int(position))%" : "\(Int(position))%") {
+                                model.subtitlePosition = position
+                            }
+                        }
+                    }
+                    Menu(String(format: "描边 · %.1f", model.subtitleOutline)) {
+                        ForEach([0.0, 1.0, 2.2, 3.0, 4.0], id: \.self) { outline in
+                            Button(model.subtitleOutline == outline ? "✓ \(outline, specifier: "%.1f")" : "\(outline, specifier: "%.1f")") {
+                                model.subtitleOutline = outline
+                            }
+                        }
+                    }
+                    Divider()
+                    Text(String(format: "字幕延迟 %+.1f 秒", model.subtitleDelay))
+                    Button("字幕提前 0.1 秒") { model.adjustSubtitleDelay(by: -0.1) }
+                    Button("字幕延后 0.1 秒") { model.adjustSubtitleDelay(by: 0.1) }
+                    Button("重置字幕延迟") { model.subtitleDelay = 0 }
                 } label: {
                     Label("字幕", systemImage: model.selectedSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill")
                         .font(.system(size: 12, weight: .medium))
@@ -245,6 +346,13 @@ struct ContentView: View {
                         }
                     }
                     Divider()
+                    Menu("效果强度 · \(Int(model.shaderStrength * 100))%") {
+                        ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { strength in
+                            Button(model.shaderStrength == strength ? "✓ \(Int(strength * 100))%" : "\(Int(strength * 100))%") {
+                                model.shaderStrength = strength
+                            }
+                        }
+                    }
                     Button("导入 mpv Shader…") { model.importShader() }
                 } label: {
                     Label(model.shaderDisplayName, systemImage: "sparkles.tv")
@@ -253,12 +361,41 @@ struct ContentView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
 
+                Image(systemName: "rectangle.on.rectangle.slash")
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in model.setOriginalPreview(true) }
+                            .onEnded { _ in model.setOriginalPreview(false) }
+                    )
+                    .help("按住查看原画（也可按住 Tab）")
+
                 Image(systemName: "speaker.wave.2.fill")
                     .foregroundStyle(.white.opacity(0.65))
                 Slider(value: $model.volume, in: 0...1)
                     .frame(width: 90)
                     .controlSize(.small)
                     .tint(.white)
+
+                Menu {
+                    Toggle("自动播放下一集", isOn: $model.autoPlayNext)
+                    if !model.recentItems.isEmpty {
+                        Divider()
+                        ForEach(model.recentItems) { item in
+                            Button(item.progress > 0 ? "\(item.title) · \(VideoPlayerModel.timecode(item.progress))" : item.title) {
+                                model.openRecent(item)
+                            }
+                        }
+                        Divider()
+                        Button("清除最近播放记录") { model.clearRecentItems() }
+                    }
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
                 iconButton("folder") { model.openMovie() }
             }
         }
@@ -310,6 +447,41 @@ private struct MouseActivityMonitor: NSViewRepresentable {
         var monitor: Any?
 
         init(handler: @escaping () -> Void) {
+            self.handler = handler
+        }
+    }
+}
+
+private struct OriginalPreviewKeyMonitor: NSViewRepresentable {
+    let handler: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(handler: handler) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+            guard event.keyCode == 48,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+            else { return event }
+            if !event.isARepeat { context.coordinator.handler(event.type == .keyDown) }
+            return nil
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.handler = handler
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    final class Coordinator {
+        var handler: (Bool) -> Void
+        var monitor: Any?
+
+        init(handler: @escaping (Bool) -> Void) {
             self.handler = handler
         }
     }
